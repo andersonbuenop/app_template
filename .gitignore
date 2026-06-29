@@ -1,0 +1,7 @@
+# Pacotes locais de teste gerados durante o desenvolvimento
+/IgorPavlov_7Zip_26.01.0_01_ML/
+
+# Arquivos temporários do Windows e editores
+Thumbs.db
+*.tmp
+*.bak
