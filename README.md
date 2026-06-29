@@ -1,6 +1,6 @@
 # SCCM / Intune App Package Builder
 
-Gerador com interface gráfica para criar pacotes PowerShell de aplicações MSI
+Gerador com interface gráfica para criar pacotes PowerShell de aplicações MSI ou EXE
 a partir do template DWP. A ferramenta copia o template, preenche os dados da
 aplicação e adiciona o instalador à pasta `Prog` sem modificar o template
 original.
@@ -18,7 +18,7 @@ original.
 
 1. Clone ou baixe o repositório em um computador Windows.
 2. Execute `Start-PackageBuilder.cmd`.
-3. Selecione o MSI e revise os metadados extraídos.
+3. Selecione o instalador MSI ou EXE e revise os metadados extraídos.
 4. Preencha os campos opcionais necessários, como processos a fechar.
 5. Confirme o diretório de saída e clique em **Gerar pacote**.
 
