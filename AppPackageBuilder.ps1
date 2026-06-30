@@ -51,12 +51,14 @@ function Get-InstallerMetadata {
     param([Parameter(Mandatory)][string]$Path)
 
     $extension = [IO.Path]::GetExtension($Path).ToLowerInvariant()
+    $fileVersion = [string](Get-Item -LiteralPath $Path).VersionInfo.FileVersion
     if ($extension -eq '.msi') {
         return [pscustomobject]@{
             Type = 'MSI'
             Manufacturer = Get-MsiProperty $Path 'Manufacturer'
             ProductName = Get-MsiProperty $Path 'ProductName'
             ProductVersion = Get-MsiProperty $Path 'ProductVersion'
+            FileVersion = $fileVersion
             ProductCode = Get-MsiProperty $Path 'ProductCode'
         }
     }
@@ -67,6 +69,7 @@ function Get-InstallerMetadata {
             Manufacturer = [string]$versionInfo.CompanyName
             ProductName = [string]$versionInfo.ProductName
             ProductVersion = [string]$versionInfo.ProductVersion
+            FileVersion = [string]$versionInfo.FileVersion
             ProductCode = ''
         }
     }
@@ -116,6 +119,23 @@ function ConvertTo-PSDoubleQuotedValue {
     param([string]$Value)
     if ($null -eq $Value) { return '' }
     return $Value.Replace('`', '``').Replace('$', '`$').Replace('"', '`"')
+}
+
+function Get-TrimmedString {
+    param([object]$Value)
+    if ($null -eq $Value) { return '' }
+    return ([string]$Value).Trim()
+}
+
+function Get-DefaultMsiInstallArguments {
+    param([string]$InstallPath)
+    return 'INSTALLDIR="' + $InstallPath + '" /qn ALLUSERS=1 REINSTALLMODE=omus /norestart'
+}
+
+function Get-DefaultExeInstallArguments {
+    param([string]$SuggestedName, [string]$InstallPath)
+    if ($SuggestedName -match '^7-Zip$') { return "/S /D=$InstallPath" }
+    return ''
 }
 
 function Set-AppVariable {
@@ -221,6 +241,10 @@ if (Test-Path -LiteralPath `$UninstallerPath) {
 function New-Package {
     param([hashtable]$Data)
 
+    foreach ($key in @('CompanyToken','AppToken','Version','System','Language','InternalVersion')) {
+        $Data[$key] = Get-TrimmedString $Data[$key]
+    }
+
     $templatePath = Join-Path $PSScriptRoot 'DWP - Application Template'
     if (-not (Test-Path -LiteralPath $templatePath -PathType Container)) {
         throw "Template não encontrado: $templatePath"
@@ -298,7 +322,11 @@ function New-Package {
             $installCommand = @"
 `$MSI = "$installerName"
 FN_Update_LogFile -Message "Installing `$MSI"
-`$ExitCode = FN_MSI_Installer -Action Install -MSIFilePath "`$(`$Util_Info.Path_Prog)\`$MSI" -Additional_Arguments "$arguments"
+`$MSIPath = "`$(`$Util_Info.Path_Prog)\`$MSI"
+`$Install_MSI_Log = "`$(`$Util_Info.Path_Log)\Install - `$MSI.log"
+`$Arguments = "/i ```"`$MSIPath```" $arguments /L*v ```"`$Install_MSI_Log```""
+FN_Update_LogFile -Message "MSI arguments: `$Arguments"
+`$ExitCode = (Start-Process "MSIExec" -ArgumentList `$Arguments -Wait -NoNewWindow -PassThru).ExitCode
 "@
         } else {
             $installCommand = @"
@@ -348,6 +376,7 @@ FN_Update_LogFile -Message "Uninstall process finished"
             Manufacturer = $Data.Manufacturer
             ProductName = $Data.AppName
             ProductVersion = $Data.Version
+            FileVersion = $Data.FileVersion
             ProductCode = $Data.ProductCode
             PackageFolder = $folderName
             RemoveAllVersions = $Data.RemoveAllVersions
@@ -389,6 +418,7 @@ if ($env:PACKAGE_BUILDER_NO_UI -eq '1') { return }
           <RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/>
           <RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/>
           <RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/>
+          <RowDefinition Height="Auto"/>
           <RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/>
         </Grid.RowDefinitions>
         <TextBlock Grid.Row="0" Grid.ColumnSpan="3" Text="Fonte" FontSize="17" FontWeight="SemiBold" Margin="0,4,0,8"/>
@@ -401,33 +431,34 @@ if ($env:PACKAGE_BUILDER_NO_UI -eq '1') { return }
         <Label Grid.Row="6" Content="Nome do aplicativo *"/><TextBox x:Name="AppName" Grid.Row="6" Grid.Column="1" Margin="4" Grid.ColumnSpan="2"/>
         <Label Grid.Row="7" Content="Nome na pasta *"/><TextBox x:Name="AppToken" Grid.Row="7" Grid.Column="1" Margin="4" Grid.ColumnSpan="2"/>
         <Label Grid.Row="8" Content="Versão *"/><TextBox x:Name="Version" Grid.Row="8" Grid.Column="1" Margin="4" Grid.ColumnSpan="2"/>
-        <Label Grid.Row="9" Content="Sistema / Idioma"/><StackPanel Grid.Row="9" Grid.Column="1" Grid.ColumnSpan="2" Orientation="Horizontal"><TextBox x:Name="SystemCode" Width="100" Margin="4"/><TextBox x:Name="Language" Width="100" Margin="4"/><Label Content="Versão interna"/><TextBox x:Name="InternalVersion" Width="100" Margin="4"/></StackPanel>
-        <Label Grid.Row="10" Content="Tipo / ProductCode"/><StackPanel Grid.Row="10" Grid.Column="1" Grid.ColumnSpan="2" Orientation="Horizontal"><TextBox x:Name="InstallerType" Width="70" Margin="4" IsReadOnly="True"/><TextBox x:Name="ProductCode" Width="520" Margin="4" IsReadOnly="True"/></StackPanel>
+        <Label Grid.Row="9" Content="File Version"/><TextBox x:Name="FileVersion" Grid.Row="9" Grid.Column="1" Margin="4" Grid.ColumnSpan="2" IsReadOnly="True" ToolTip="Versão do arquivo lida de VersionInfo.FileVersion do instalador."/>
+        <Label Grid.Row="10" Content="Sistema / Idioma"/><StackPanel Grid.Row="10" Grid.Column="1" Grid.ColumnSpan="2" Orientation="Horizontal"><TextBox x:Name="SystemCode" Width="100" Margin="4"/><TextBox x:Name="Language" Width="100" Margin="4"/><Label Content="Versão interna"/><TextBox x:Name="InternalVersion" Width="100" Margin="4"/></StackPanel>
+        <Label x:Name="InstallerTypeLabel" Grid.Row="11" Content="Tipo / ProductCode"/><StackPanel Grid.Row="11" Grid.Column="1" Grid.ColumnSpan="2" Orientation="Horizontal"><TextBox x:Name="InstallerType" Width="70" Margin="4" IsReadOnly="True"/><TextBox x:Name="ProductCode" Width="520" Margin="4" IsReadOnly="True"/></StackPanel>
 
-        <TextBlock Grid.Row="11" Grid.ColumnSpan="3" Text="Instalação e detecção" FontSize="17" FontWeight="SemiBold" Margin="0,14,0,8"/>
-        <Label x:Name="InstallArgumentsLabel" Grid.Row="12" Content="Argumentos MSI"/><TextBox x:Name="InstallArguments" Grid.Row="12" Grid.Column="1" Margin="4" Grid.ColumnSpan="2"/>
-        <Label Grid.Row="13" Content="Desinstalador EXE"/><TextBox x:Name="UninstallPath" Grid.Row="13" Grid.Column="1" Margin="4" Grid.ColumnSpan="2" ToolTip="Obrigatório para EXE. Caminho completo do desinstalador após a instalação."/>
-        <Label Grid.Row="14" Content="Argumentos de desinstalação"/><TextBox x:Name="UninstallArguments" Grid.Row="14" Grid.Column="1" Margin="4" Grid.ColumnSpan="2"/>
-        <Label Grid.Row="15" Content="Executável de detecção"/><TextBox x:Name="DetectionPath" Grid.Row="15" Grid.Column="1" Margin="4" Grid.ColumnSpan="2" ToolTip="Obrigatório para EXE. Opcional para MSI, que pode usar o ProductCode."/>
-        <Label Grid.Row="16" Content="Versão de detecção"/><TextBox x:Name="DetectionVersion" Grid.Row="16" Grid.Column="1" Margin="4" Grid.ColumnSpan="2" ToolTip="Obrigatório para EXE. Versão do executável instalado."/>
-        <Label Grid.Row="17" Content="Processos a fechar"/><TextBox x:Name="Processes" Grid.Row="17" Grid.Column="1" Margin="4" Grid.ColumnSpan="2" ToolTip="Separe os nomes por vírgula"/>
-        <Label Grid.Row="18" Content="Padrão DisplayName"/><TextBox x:Name="DisplayPattern" Grid.Row="18" Grid.Column="1" Margin="4" Grid.ColumnSpan="2"/>
-        <CheckBox x:Name="RemoveAllVersions" Grid.Row="19" Grid.Column="1" Grid.ColumnSpan="2" Margin="5,10" Content="Remover todas as versões MSI anteriores encontradas pelo DisplayName" IsChecked="True"/>
+        <TextBlock Grid.Row="12" Grid.ColumnSpan="3" Text="Instalação e detecção" FontSize="17" FontWeight="SemiBold" Margin="0,14,0,8"/>
+        <Label x:Name="InstallArgumentsLabel" Grid.Row="13" Content="Argumentos de instalação"/><TextBox x:Name="InstallArguments" Grid.Row="13" Grid.Column="1" Margin="4" Grid.ColumnSpan="2" ToolTip="Argumentos usados na instalação. Para MSI, já inclui os padrões silenciosos do módulo e pode ser alterado."/>
+        <Label Grid.Row="14" Content="Desinstalador EXE"/><TextBox x:Name="UninstallPath" Grid.Row="14" Grid.Column="1" Margin="4" Grid.ColumnSpan="2" ToolTip="Opcional para EXE. Caminho completo do desinstalador após a instalação, se souber."/>
+        <Label Grid.Row="15" Content="Argumentos de desinstalação"/><TextBox x:Name="UninstallArguments" Grid.Row="15" Grid.Column="1" Margin="4" Grid.ColumnSpan="2"/>
+        <Label Grid.Row="16" Content="Executável de detecção"/><TextBox x:Name="DetectionPath" Grid.Row="16" Grid.Column="1" Margin="4" Grid.ColumnSpan="2" ToolTip="Opcional. Se vazio, preencha a detecção manualmente no Intune/SCCM depois."/>
+        <Label Grid.Row="17" Content="Versão de detecção"/><TextBox x:Name="DetectionVersion" Grid.Row="17" Grid.Column="1" Margin="4" Grid.ColumnSpan="2" ToolTip="Opcional. Versão do executável instalado, se souber."/>
+        <Label Grid.Row="18" Content="Processos a fechar"/><TextBox x:Name="Processes" Grid.Row="18" Grid.Column="1" Margin="4" Grid.ColumnSpan="2" ToolTip="Separe os nomes por vírgula"/>
+        <Label x:Name="DisplayPatternLabel" Grid.Row="19" Content="Padrão DisplayName"/><TextBox x:Name="DisplayPattern" Grid.Row="19" Grid.Column="1" Margin="4" Grid.ColumnSpan="2"/>
+        <CheckBox x:Name="RemoveAllVersions" Grid.Row="20" Grid.Column="1" Grid.ColumnSpan="2" Margin="5,10" Content="Remover todas as versões MSI anteriores encontradas pelo DisplayName" IsChecked="True"/>
       </Grid>
     </ScrollViewer>
-    <DockPanel Grid.Row="2" Margin="0,14,0,0">
-      <TextBlock x:Name="FolderPreview" VerticalAlignment="Center" Foreground="#444" TextWrapping="Wrap"/>
-      <Button x:Name="Generate" Content="Gerar pacote" Padding="24,9" FontWeight="SemiBold" DockPanel.Dock="Right"/>
-    </DockPanel>
+    <StackPanel Grid.Row="2" Margin="0,14,0,0" HorizontalAlignment="Center">
+      <TextBlock x:Name="FolderPreview" Foreground="#444" TextWrapping="Wrap" TextAlignment="Center" Margin="0,0,0,10"/>
+      <Button x:Name="Generate" Content="Gerar pacote" Padding="24,9" FontWeight="SemiBold" HorizontalAlignment="Center"/>
+    </StackPanel>
   </Grid>
 </Window>
 '@
 
 $reader = New-Object System.Xml.XmlNodeReader $xaml
 $window = [Windows.Markup.XamlReader]::Load($reader)
-$names = 'InstallerPath','InstallerType','OutputRoot','Manufacturer','CompanyToken','AppName','AppToken','Version','SystemCode',
+$names = 'InstallerPath','InstallerType','InstallerTypeLabel','OutputRoot','Manufacturer','CompanyToken','AppName','AppToken','Version','FileVersion','SystemCode',
     'Language','InternalVersion','ProductCode','InstallArguments','InstallArgumentsLabel','UninstallPath',
-    'UninstallArguments','DetectionPath','DetectionVersion','Processes','DisplayPattern','RemoveAllVersions',
+    'UninstallArguments','DetectionPath','DetectionVersion','Processes','DisplayPattern','DisplayPatternLabel','RemoveAllVersions',
     'BrowseInstaller','BrowseOutput','Generate','FolderPreview'
 $ui = @{}
 foreach ($name in $names) { $ui[$name] = $window.FindName($name) }
@@ -438,12 +469,31 @@ $ui.Language.Text = 'ML'
 $ui.InternalVersion.Text = '01.00'
 
 $updatePreview = {
-    $folder = '{0}_{1}_{2}_{3}_{4}' -f $ui.CompanyToken.Text, $ui.AppToken.Text,
-        $ui.Version.Text, $ui.SystemCode.Text, $ui.Language.Text
+    $folder = '{0}_{1}_{2}_{3}_{4}' -f (Get-TrimmedString $ui.CompanyToken.Text), (Get-TrimmedString $ui.AppToken.Text),
+        (Get-TrimmedString $ui.Version.Text), (Get-TrimmedString $ui.SystemCode.Text), (Get-TrimmedString $ui.Language.Text)
     $ui.FolderPreview.Text = "Pasta: $folder"
 }
 foreach ($field in @('CompanyToken','AppToken','Version','SystemCode','Language')) {
     $ui[$field].Add_TextChanged($updatePreview)
+}
+
+$setInstallerSpecificFields = {
+    param([string]$InstallerType)
+
+    if ($InstallerType -eq 'MSI') {
+        $ui.InstallerTypeLabel.Content = 'Tipo / ProductCode'
+        $ui.ProductCode.Visibility = 'Visible'
+        $ui.DisplayPatternLabel.Visibility = 'Visible'
+        $ui.DisplayPattern.Visibility = 'Visible'
+        $ui.RemoveAllVersions.Visibility = 'Visible'
+        return
+    }
+
+    $ui.InstallerTypeLabel.Content = 'Tipo'
+    $ui.ProductCode.Visibility = 'Collapsed'
+    $ui.DisplayPatternLabel.Visibility = 'Collapsed'
+    $ui.DisplayPattern.Visibility = 'Collapsed'
+    $ui.RemoveAllVersions.Visibility = 'Collapsed'
 }
 
 $ui.BrowseOutput.Add_Click({
@@ -469,6 +519,7 @@ $ui.BrowseInstaller.Add_Click({
             $ui.AppName.Text = $suggestedName
             $ui.AppToken.Text = $appToken
             $ui.Version.Text = $metadata.ProductVersion
+            $ui.FileVersion.Text = $metadata.FileVersion
             $ui.ProductCode.Text = $metadata.ProductCode
             $ui.DetectionVersion.Text = $metadata.ProductVersion
             $ui.DisplayPattern.Text = $suggestedName
@@ -478,23 +529,24 @@ $ui.BrowseInstaller.Add_Click({
             $ui.DetectionPath.Text = ''
 
             if ($metadata.Type -eq 'MSI') {
+                & $setInstallerSpecificFields 'MSI'
                 $ui.InstallArgumentsLabel.Content = 'Argumentos MSI'
-                $ui.InstallArguments.Text = 'INSTALLDIR="' + $defaultInstallPath + '"'
+                $ui.InstallArguments.Text = Get-DefaultMsiInstallArguments $defaultInstallPath
                 $ui.RemoveAllVersions.IsEnabled = $true
                 $ui.RemoveAllVersions.IsChecked = $true
             } else {
+                & $setInstallerSpecificFields 'EXE'
                 $ui.InstallArgumentsLabel.Content = 'Argumentos EXE'
-                $ui.InstallArguments.Text = ''
+                $ui.InstallArguments.Text = Get-DefaultExeInstallArguments $suggestedName $defaultInstallPath
                 $ui.RemoveAllVersions.IsChecked = $false
                 $ui.RemoveAllVersions.IsEnabled = $false
                 if ($suggestedName -match '^7-Zip$') {
-                    $ui.InstallArguments.Text = "/S /D=$defaultInstallPath"
                     $ui.UninstallPath.Text = "$defaultInstallPath\Uninstall.exe"
                     $ui.UninstallArguments.Text = '/S'
                     $ui.DetectionPath.Text = "$defaultInstallPath\7z.exe"
                     $ui.Processes.Text = '7zFM, 7z'
                 } else {
-                    Show-Info 'EXE selecionado. Informe os argumentos silenciosos, o desinstalador e o executável de detecção antes de gerar.'
+                    Show-Info 'EXE selecionado. Revise os argumentos silenciosos. Desinstalador e detecção são opcionais e podem ser preenchidos depois no Intune/SCCM.'
                 }
             }
 
@@ -519,9 +571,7 @@ $ui.Generate.Add_Click({
         $required['ProductCode'] = $ui.ProductCode.Text
         $required['Padrão DisplayName'] = $ui.DisplayPattern.Text
     } elseif ($ui.InstallerType.Text -eq 'EXE') {
-        $required['Desinstalador EXE'] = $ui.UninstallPath.Text
-        $required['Executável de detecção'] = $ui.DetectionPath.Text
-        $required['Versão de detecção'] = $ui.DetectionVersion.Text
+        # EXE uninstall and detection fields are optional; they can be completed later in Intune/SCCM.
     } else {
         Show-Error 'Selecione um instalador MSI ou EXE.'
         return
@@ -540,15 +590,16 @@ $ui.Generate.Add_Click({
     try {
         $ui.Generate.IsEnabled = $false
         $data = @{
-            InstallerPath = $ui.InstallerPath.Text; InstallerType = $ui.InstallerType.Text
-            OutputRoot = $ui.OutputRoot.Text
-            Manufacturer = $ui.Manufacturer.Text; CompanyToken = $ui.CompanyToken.Text
-            AppName = $ui.AppName.Text; AppToken = $ui.AppToken.Text; Version = $ui.Version.Text
-            System = $ui.SystemCode.Text; Language = $ui.Language.Text; InternalVersion = $ui.InternalVersion.Text
-            ProductCode = $ui.ProductCode.Text; InstallArguments = $ui.InstallArguments.Text
-            UninstallPath = $ui.UninstallPath.Text; UninstallArguments = $ui.UninstallArguments.Text
-            DetectionPath = $ui.DetectionPath.Text; DetectionVersion = $ui.DetectionVersion.Text
-            Processes = $ui.Processes.Text; DisplayPattern = $ui.DisplayPattern.Text
+            InstallerPath = Get-TrimmedString $ui.InstallerPath.Text; InstallerType = Get-TrimmedString $ui.InstallerType.Text
+            OutputRoot = Get-TrimmedString $ui.OutputRoot.Text
+            Manufacturer = Get-TrimmedString $ui.Manufacturer.Text; CompanyToken = Get-TrimmedString $ui.CompanyToken.Text
+            AppName = Get-TrimmedString $ui.AppName.Text; AppToken = Get-TrimmedString $ui.AppToken.Text; Version = Get-TrimmedString $ui.Version.Text
+            FileVersion = Get-TrimmedString $ui.FileVersion.Text
+            System = Get-TrimmedString $ui.SystemCode.Text; Language = Get-TrimmedString $ui.Language.Text; InternalVersion = Get-TrimmedString $ui.InternalVersion.Text
+            ProductCode = Get-TrimmedString $ui.ProductCode.Text; InstallArguments = Get-TrimmedString $ui.InstallArguments.Text
+            UninstallPath = Get-TrimmedString $ui.UninstallPath.Text; UninstallArguments = Get-TrimmedString $ui.UninstallArguments.Text
+            DetectionPath = Get-TrimmedString $ui.DetectionPath.Text; DetectionVersion = Get-TrimmedString $ui.DetectionVersion.Text
+            Processes = Get-TrimmedString $ui.Processes.Text; DisplayPattern = Get-TrimmedString $ui.DisplayPattern.Text
             RemoveAllVersions = [bool]$ui.RemoveAllVersions.IsChecked
         }
         $created = New-Package $data
