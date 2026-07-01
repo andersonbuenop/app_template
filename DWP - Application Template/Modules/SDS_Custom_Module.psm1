@@ -1,4 +1,4 @@
-﻿<#
+<#
 Module Version: 1.4
 PowerShell Module monitored by Microsoft Intune Scripts and Remediations
 Please, do not modify this file in a monitored environment
@@ -8,7 +8,7 @@ function FN_Utility {
 param(
 [Parameter(Mandatory = $true)][string]$Action
 )
-$Path_Log = 'C:\Logs'
+$Path_Log = 'C:\Sys_com\Logs'
 if ($Action -eq 'UnInstall') { $Path_LogFile = ($Path_Log + '\' + $($App_Info.FullName) + '_UnInstall.log') } Else { $Path_LogFile = ($Path_Log + '\' + $($App_Info.FullName) + '.log') }
 $Path_Script = $(Get-Location).Path
 $Path_Prog = $Path_Script + "\Prog"
@@ -319,6 +319,29 @@ Return $Result_EXE_Action
 
 }
 
+function FN_Copy_Log_To_Intune {
+    try {
+        $IntuneLogDir = "C:\ProgramData\Microsoft\IntuneManagementExtension\Logs"
+
+        if (!(Test-Path $IntuneLogDir)) {
+            New-Item -Path $IntuneLogDir -ItemType Directory -Force | Out-Null
+        }
+
+        if (Test-Path $Util_Info.Path_LogFile) {
+            $IntuneLogFile = Join-Path $IntuneLogDir ("App-" + (Split-Path $Util_Info.Path_LogFile -Leaf))
+            Copy-Item -Path $Util_Info.Path_LogFile -Destination $IntuneLogFile -Force -ErrorAction SilentlyContinue
+        }
+
+        # Opcional: copiar todos os logs desse app
+        Get-ChildItem -Path $Util_Info.Path_Log -Filter "$($App_Info.FullName)*.log" -ErrorAction SilentlyContinue |
+            ForEach-Object {
+                Copy-Item $_.FullName -Destination (Join-Path $IntuneLogDir ("App-" + $_.Name)) -Force -ErrorAction SilentlyContinue
+            }
+    } catch {
+        # Sem impacto na execução principal
+    }
+}
+
 function FN_Finish_LogFile {
 param(
 [Parameter(Mandatory = $true)][string]$Final_ExitCode
@@ -350,6 +373,8 @@ FN_Update_LogFile -Message "<<<< Finish $(Get-Date -Format 'dd/MM/yyyy HH:mm:ss'
 FN_Update_LogFile -Message '-----------------------------------------------------------------------------------'
 FN_Update_LogFile -Message ' '
 FN_Update_LogFile -Message ' '
+
+FN_Copy_Log_To_Intune
 
 $host.SetShouldExit($Final_ExitCode)
 Exit $Final_ExitCode
