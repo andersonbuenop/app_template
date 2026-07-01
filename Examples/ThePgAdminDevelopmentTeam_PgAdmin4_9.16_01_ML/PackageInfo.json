@@ -1,0 +1,15 @@
+﻿{
+    "GeneratedAt":  "2026-07-01T11:50:41",
+    "SourceInstaller":  "pgadmin4-9.16-x64.exe",
+    "InstallerType":  "EXE",
+    "Manufacturer":  "The pgAdmin Development Team",
+    "ProductName":  "pgAdmin 4",
+    "ProductVersion":  "9.16",
+    "FileVersion":  "",
+    "ProductCode":  "",
+    "PackageFolder":  "ThePgAdminDevelopmentTeam_PgAdmin4_9.16_01_ML",
+    "RemoveAllVersions":  false,
+    "InstallArguments":  "/ALLUSERS /VERYSILENT /NORESTART /DIR=\"C:\\Applics\\PGAdmin\" /LOG=\"C:\\Sys_com\\Logs\\Pgadmin4916.log\"",
+    "UninstallPath":  "C:\\Applics\\PGAdmin\\unins000.exe",
+    "UninstallArguments":  "/VERYSILENT /NORESTART"
+}

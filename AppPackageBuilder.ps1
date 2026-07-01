@@ -316,7 +316,8 @@ function New-Package {
             $uninstallRemoval = New-ExeUninstallBlock $Data.UninstallPath $Data.UninstallArguments 'ExitCode'
         }
         $installerName = ConvertTo-PSDoubleQuotedValue ([IO.Path]::GetFileName($Data.InstallerPath))
-        $arguments = ConvertTo-PSDoubleQuotedValue $Data.InstallArguments
+        #$arguments = ConvertTo-PSDoubleQuotedValue $Data.InstallArguments
+        $arguments = $Data.InstallArguments
 
         if ($Data.InstallerType -eq 'MSI') {
             $installCommand = @"
@@ -332,7 +333,7 @@ FN_Update_LogFile -Message "MSI arguments: `$Arguments"
             $installCommand = @"
 `$EXE = "$installerName"
 FN_Update_LogFile -Message "Installing `$EXE"
-`$ExitCode = FN_Run_EXE_File -EXEFilePath "`$(`$Util_Info.Path_Prog)\`$EXE" -Arguments "$arguments" -Wait All
+`$ExitCode = FN_Run_EXE_File -EXEFilePath "`$(`$Util_Info.Path_Prog)\`$EXE" -Arguments '$arguments' -Wait All
 "@
         }
 

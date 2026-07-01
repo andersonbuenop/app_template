@@ -13,7 +13,7 @@
 # Initialize Modules and Variables													 # 
 ######################################################################################
 
-Import-Module .\Modules\SDS_Custom_Module.psm1
+Import-Module .\Modules\SDS_Custom_Module.psm1 -Force
 $Global:App_Info = FN_Get_AppInformation
 $Global:Util_Info = FN_Utility -Action UnInstall
 $Global:Computer_info = FN_ComputerInformation
